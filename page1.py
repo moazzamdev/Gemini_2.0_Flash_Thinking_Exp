@@ -1,4 +1,5 @@
 import streamlit as st
+from PyPDF2 import PdfReader
 from langchain_core.messages import HumanMessage, AIMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import LLMChain
@@ -9,10 +10,9 @@ import base64
 import io
 import time
 from PIL import Image
-from st_multimodal_chatinput import multimodal_chatinput
-
+import os
 # Set your Google API key here
-GOOGLE_API_KEY = "AIzaSyC9ScRqi9g-YghNuS5w7o7Erwtd5RIN_Zo"
+GOOGLE_API_KEY = os.environ.get("api_key")
 
 
 def convert_to_base64(uploaded_file):
@@ -29,6 +29,15 @@ def convert_to_base64(uploaded_file):
 
 def text():
     st.title("Gemini 2.0 Thinking Experimental")
+    st.sidebar.title("Capabilities:")
+
+    # Add bullet points
+    st.sidebar.markdown("""
+            - **Text Queries**
+            - **Visual Queries**
+            - **PDF Support**
+           
+            """)
     st.markdown("""
     <style>
         .anim-typewriter {
@@ -79,8 +88,8 @@ def text():
         google_api_key=GOOGLE_API_KEY,
         temperature=0.3,
         streaming=True,
-        timeout=60,
-        max_retries=3
+        timeout=120,
+        max_retries=6
 
     )
 
@@ -90,7 +99,7 @@ def text():
         # Show initial bot message
         if len(st.session_state.messages) == 0:
             animated_text = '<div class="anim-typewriter">Hello 👋, how may I assist you today?</div>'
-            #st.chat_message("assistant").markdown(animated_text, unsafe_allow_html=True)
+            # st.chat_message("assistant").markdown(animated_text, unsafe_allow_html=True)
             st.session_state.messages.append({"role": "assistant", "content": "Hello 👋, how may I assist you today?"})
 
         # Display historical messages
@@ -98,7 +107,7 @@ def text():
             if message["role"] == "user":
                 if message.get("image"):
                     st.chat_message("user", avatar="🧑").markdown(
-                        f'{message["content"]}<br><img src="{message["image"]}" width="200">',
+                        f"""{message["content"]}<br><br>{'<img src="' + message["image"] + f'" width="50" style="margin-top: 10px; border-radius: 8px;">' if message["file_type"] == "application/pdf" else '<img src="' + message["image"] + f'" width="200" style="margin-top: 10px; border-radius: 8px;">'}<br> {f'<i style="font-size: 12px;">{message["file_name"]}</i>' if message["file_type"] == "application/pdf" else message["file_name"] if message["file_type"] else ''}""",
                         unsafe_allow_html=True
                     )
                 else:
@@ -107,30 +116,52 @@ def text():
                 st.chat_message("assistant", avatar="🤖").markdown(message["content"])
 
     # Chat input with multimodal support
-    user_input = st.chat_input("Say something", accept_file=True, file_type=["png", "jpg", "jpeg"])
+    user_input = st.chat_input("Say something", accept_file=True, file_type=["png", "jpg", "jpeg", "pdf"])
 
     if user_input:
+        file_type = None
+        file_name = ""
+        image_base64 = convert_to_base64("pdf_icon.png")
+        image_url = f"data:image/jpeg;base64,{image_base64}"
         # Process user input
-        image_url = ""
+        #image_url = ""
         message_content = [{"type": "text", "text": user_input.text}]
+        files = user_input["files"]
 
-        if user_input["files"]:
+
+        if files:
+            file_type = files[0].type
+            
+
+        if file_type in ["image/png", "image/jpg", "image/jpeg"]:
             uploaded_file = user_input["files"][0]
             image_base64 = convert_to_base64(uploaded_file)
             image_url = f"data:image/jpeg;base64,{image_base64}"
-            message_content.append({"type": "image_url", "image_url": image_url})
 
+            message_content.append({"type": "image_url", "image_url": image_url})
+        text = ""
+        if file_type == "application/pdf":
+            uploaded_file = user_input["files"][0]
+            file_name = files[0].name
+            pdf_reader = PdfReader(uploaded_file)
+            for page in pdf_reader.pages:
+                text += page.extract_text()
+            #st.sidebar.write(text)
+            prompt = "this is pdf data: \n"+text +"this is user asking about pdf:"+user_input.text
+            message_content = [{"type": "text", "text": prompt}]
+            message_content.append({"type": "text", "text": file_name})
+            #message_content.append({"type": "image_url", "image_url": image_url})
         # Add user message to UI
         with chat_container:
-            if image_url:
+            if file_type:
                 st.chat_message("user", avatar="🧑").markdown(
-                    f'''
-                    
-                        {user_input.text}
-                        <br>
-                        <img src="{image_url}" width="200" style="margin-top: 10px; border-radius: 8px;">
-                    
-                    ''',
+                    f"""
+                    {user_input.text}
+                    <br><br>
+                    {'<img src="' + image_url + f'" width="50" style="margin-top: 10px; border-radius: 8px;">' if file_type == "application/pdf" else '<img src="' + image_url + f'" width="200" style="margin-top: 10px; border-radius: 8px;">' if file_type else ''}
+                    <br>
+                     {f'<i style="font-size: 12px;">{file_name}</i>' if file_type == "application/pdf" else file_name if file_type else ''}
+                    """,
                     unsafe_allow_html=True
                 )
 
@@ -141,7 +172,9 @@ def text():
         st.session_state.messages.append({
             "role": "user",
             "content": user_input.text,
-            "image": image_url if user_input["files"] else ""
+            "image": image_url if user_input["files"] else "",
+            "file_name" : file_name,
+            "file_type" : file_type
         })
 
         # Create LangChain message
@@ -243,6 +276,4 @@ def text():
             {"input": user_message.content},
             {"output": ai_message.content}
         )
-
-        #st.sidebar.subheader("Raw Chat History")
-        #st.sidebar.write(st.session_state.chat_history.messages)
+        #st.sidebar.write(user_message)
