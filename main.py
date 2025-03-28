@@ -12,13 +12,13 @@ def main():
     with st.sidebar:
         selection = option_menu(
         menu_title="Main Menu",
-        options=["About Gemini","Text + Image Queries", "Image Generation"],
+        options=["About Gemini","Multimodal", "Image Generation"],
         icons=["book","pencil", "image"],
         menu_icon="cast",
         default_index=1
         )
 
-    if selection == "Text + Image Queries":
+    if selection == "Multimodal":
         text()
 
     elif selection == "Image Generation":
